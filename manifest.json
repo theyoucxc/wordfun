@@ -1,0 +1,15 @@
+{
+  "name": "词趣 WordFun",
+  "short_name": "词趣",
+  "description": "自主导入单词的英语学习应用",
+  "lang": "zh-CN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F7FAFC",
+  "theme_color": "#0EA5E9",
+  "icons": [
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
