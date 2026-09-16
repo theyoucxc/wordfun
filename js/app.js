@@ -189,11 +189,9 @@ window.App = (function () {
       });
       applyResult(q, true);
     } else {
-      // 答错：立即判定落库，反馈后进入照抄纠正（纠正不计入）
+      // 答错：提示正确单词后继续；错词稍后换题型重问一次
       UI.showFeedback(false, res.correctText, function () {
-        UI.renderSpellCorrection(q, function () {
-          proceed(q, false, 'spelling');
-        });
+        proceed(q, false, 'spelling');
       });
       applyResult(q, false);
     }
@@ -211,8 +209,20 @@ window.App = (function () {
     if (correct && wasNew) S.newLearned++;
     S.byType[q.type].t++;
     if (correct) S.byType[q.type].c++;
-    if (!correct) S.requeue.push(q); // 错题结尾重问一次
+    if (!correct) scheduleRetry(q); // 错题 3~5 题后换题型重问一次
     persist();
+  }
+
+  // 错题重问：3~5 题后换一种题型复习同一词（_r 后缀，不重复落库）
+  function scheduleRetry(q) {
+    var retryQ = Questions.genRetry(q, Store.getWords());
+    if (!retryQ) return;
+    retryQ.id = retryQ.id + '_r';
+    var gap = 3 + Math.floor(Math.random() * 3); // 3~5 题后
+    var insertAt = Math.min(S.idx + gap, S.queue.length);
+    S.queue.splice(insertAt, 0, retryQ);
+    S.totalScreens++;
+    UI.updateProgress(S.answeredScreens, S.totalScreens);
   }
 
   function proceed(q, correct, type) {

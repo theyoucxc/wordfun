@@ -77,14 +77,17 @@ window.Questions = (function () {
     };
   }
 
-  // 配对：N 词配 N 义（右列洗牌），至少 2 对
+  // 配对：N 词配 N 义，左列单词保持原序、右列词义按 rightOrder 打乱显示，至少 2 对
   function genMatching(group) {
     var items = group.filter(function (w) { return w.meaning; });
     if (items.length < 2) return null;
-    var meanings = shuffle(items).map(function (w) { return w.meaning; });
-    var pairs = items.map(function (w, i) {
-      return { wordId: w.id, left: w.word, right: meanings[i], wrongAttempts: 0 };
+    // 每对 right 存「该词的真实词义」作为判定答案键；右列显示顺序由 rightOrder 单独打乱
+    var pairs = items.map(function (w) {
+      return { wordId: w.id, left: w.word, right: w.meaning, wrongAttempts: 0 };
     });
+    var rightOrder = [];
+    for (var i = 0; i < pairs.length; i++) rightOrder.push(i);
+    rightOrder = shuffle(rightOrder);
     return {
       id: nextId('m'),
       type: 'matching',
@@ -95,8 +98,26 @@ window.Questions = (function () {
       autoSpeak: false,
       choices: null,
       answer: '',
-      pairs: pairs
+      pairs: pairs,
+      rightOrder: rightOrder
     };
+  }
+
+  // 错题重问：换一种题型（看词选义 ↔ 看义选词 ↔ 拼写）复习同一个词
+  function genRetry(originalQ, allWords) {
+    var word = null;
+    for (var i = 0; i < allWords.length; i++) {
+      if (allWords[i].id === originalQ.wordId) { word = allWords[i]; break; }
+    }
+    if (!word) return null;
+    if (originalQ.type === 'spelling') {
+      return genChoice(word, allWords, 'w2m') || genChoice(word, allWords, 'm2w') || genSpelling(word);
+    }
+    if (originalQ.type === 'choice') {
+      var alt = originalQ.direction === 'w2m' ? 'm2w' : 'w2m';
+      return genChoice(word, allWords, alt) || genSpelling(word) || genChoice(word, allWords, originalQ.direction);
+    }
+    return null;
   }
 
   // 会话组装：每 10 词含 1 轮配对（放末尾），其余按 3 题型轮转（发音功能已暂停，无听音题）
@@ -153,6 +174,7 @@ window.Questions = (function () {
     genChoice: genChoice,
     genSpelling: genSpelling,
     genMatching: genMatching,
+    genRetry: genRetry,
     assemble: assemble,
     check: check
   };

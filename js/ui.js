@@ -701,6 +701,7 @@ window.UI = (function () {
       input.setAttribute('spellcheck', 'false');
       input.setAttribute('enterkeyhint', 'go');
       var checkBtn = btn('检查', 'btn-primary');
+      checkBtn.type = 'submit';   // 放入 form，点击即提交（Enter 亦触发同一 submit 处理）
       checkBtn.disabled = true;
       input.addEventListener('input', function () {
         checkBtn.disabled = !input.value.trim();
@@ -731,8 +732,20 @@ window.UI = (function () {
     var matchedR = {};
     var selLeft = null;
     var leftBtns = [];
-    var rightBtns = [];
+    var order = q.rightOrder || q.pairs.map(function (_, i) { return i; }); // 旧会话兜底
 
+    function doneCheck() {
+      if (Object.keys(matchedL).length === q.pairs.length &&
+          Object.keys(matchedR).length === q.pairs.length) {
+        setTimeout(function () {
+          h.onMatchingDone(q.pairs.map(function (p) {
+            return { wordId: p.wordId, wrongAttempts: p.wrongAttempts };
+          }));
+        }, 300);
+      }
+    }
+
+    // 左列：单词，保持原序
     q.pairs.forEach(function (p, i) {
       var lb = btn(p.left, 'match-item');
       lb.addEventListener('click', function () {
@@ -742,86 +755,41 @@ window.UI = (function () {
       });
       leftBtns.push(lb);
       leftCol.append(lb);
+    });
 
+    // 右列：词义，按 rightOrder 打乱显示
+    order.forEach(function (pairIdx) {
+      var p = q.pairs[pairIdx];
       var rb = btn(p.right, 'match-item');
       rb.addEventListener('click', function () {
-        if (matchedR[i] || selLeft === null) return;
+        if (matchedR[pairIdx] || selLeft === null) return;
         var li = selLeft;
-        if (q.pairs[li].right === q.pairs[i].right) {
+        if (q.pairs[li].right === p.right) {   // 左侧单词的真实词义 vs 右侧按钮显示词义
           matchedL[li] = true;
-          matchedR[i] = true;
+          matchedR[pairIdx] = true;
           selLeft = null;
           leftBtns[li].classList.add('ok');
-          rightBtns[i].classList.add('ok');
           leftBtns[li].disabled = true;
-          rightBtns[i].disabled = true;
-          if (Object.keys(matchedL).length === q.pairs.length &&
-              Object.keys(matchedR).length === q.pairs.length) {
-            setTimeout(function () {
-              h.onMatchingDone(q.pairs.map(function (p) {
-                return { wordId: p.wordId, wrongAttempts: p.wrongAttempts };
-              }));
-            }, 300);
-          }
+          rb.classList.add('ok');
+          rb.disabled = true;
+          doneCheck();
         } else {
           q.pairs[li].wrongAttempts++;
           selLeft = null;
           leftBtns[li].classList.add('shake');
-          rightBtns[i].classList.add('shake');
-          var lBtn = leftBtns[li], rBtn = rightBtns[i];
+          rb.classList.add('shake');
+          var lRef = leftBtns[li], rRef = rb;
           setTimeout(function () {
-            lBtn.classList.remove('shake', 'selected');
-            rBtn.classList.remove('shake');
+            lRef.classList.remove('shake', 'selected');
+            rRef.classList.remove('shake');
           }, 400);
         }
       });
-      rightBtns.push(rb);
       rightCol.append(rb);
     });
 
     grid.append(leftCol, rightCol);
     card.append(grid);
-  }
-
-  // 拼写题答错后的照抄纠正（不计入 SRS 与统计）
-  function renderSpellCorrection(q, onDone) {
-    var wrap = document.getElementById('q-wrap');
-    if (!wrap) return;
-    wrap.textContent = '';
-    var card = el('div', 'card q-card');
-    card.append(
-      el('div', 'q-sub', '拼写错了，照抄一遍这个单词'),
-      el('div', 'q-prompt', q.answer)
-    );
-
-    var form = document.createElement('form');
-    var formRow = el('div', 'spell-row');
-    var input = mkInput({ placeholder: '输入上面的单词', maxlength: 60 });
-    input.setAttribute('autocomplete', 'off');
-    input.setAttribute('autocapitalize', 'off');
-    input.setAttribute('autocorrect', 'off');
-    input.setAttribute('spellcheck', 'false');
-    input.setAttribute('enterkeyhint', 'go');
-    var okBtn = btn('继续', 'btn-primary');
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var a = input.value.trim().replace(/\s+/g, ' ').toLowerCase();
-      var b = q.answer.trim().replace(/\s+/g, ' ').toLowerCase();
-      if (a === b) onDone();
-      else toast('拼写不一致，请对照抄写');
-    });
-    formRow.append(input, okBtn);
-    form.append(formRow);
-    card.append(form);
-    input.focus();
-
-    var skipRow = el('div', 'q-speak-row');
-    var skipBtn = btn('跳过', 'btn-sm');
-    skipBtn.addEventListener('click', onDone);
-    skipRow.append(skipBtn);
-    card.append(skipRow);
-
-    wrap.append(card);
   }
 
   // 反馈条：答对 800ms 自动继续；答错显示正确答案需点「继续」
@@ -918,7 +886,6 @@ window.UI = (function () {
     renderPracticeHeader: renderPracticeHeader,
     updateProgress: updateProgress,
     renderQuestion: renderQuestion,
-    renderSpellCorrection: renderSpellCorrection,
     showFeedback: showFeedback,
     renderSummary: renderSummary,
     openWordForm: openWordForm,

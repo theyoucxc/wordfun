@@ -318,7 +318,6 @@ body.in-practice .topbar { display: none; }
 .q-prompt { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 6px; word-break: break-word; }
 .q-sub { font-size: 14px; color: var(--muted); text-align: center; margin-bottom: 16px; font-style: normal; }
 .q-sub.example { font-style: italic; }
-.q-speak-row { display: flex; justify-content: center; margin-bottom: 16px; }
 
 .speaker-btn {
   border: 1px solid var(--border-strong); background: var(--card);

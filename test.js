@@ -166,6 +166,16 @@ var tenWords = allWords.slice(0, 10);
 var queue = Questions.assemble(tenWords, allWords);
 assert(queue.length === 6, 'assemble(10) = 5 单题 + 1 配对轮：实际 ' + queue.length);
 assert(queue[5].type === 'matching' && queue[5].pairs.length === 5, '配对轮收尾且 5 对');
+
+var mg = Questions.genMatching(tenWords.slice(0, 5));
+assert(mg && mg.pairs.length === 5, '配对题生成 5 对');
+assert(mg.rightOrder && mg.rightOrder.length === 5, '配对题带右列打乱顺序');
+assert(mg.rightOrder.slice().sort().join(',') === '0,1,2,3,4', '右列打乱顺序是 0..4 的排列');
+var pairRightOk = mg.pairs.every(function (p) {
+  var w = Store.getWord(p.wordId);
+  return w && p.right === w.meaning;
+});
+assert(pairRightOk, '配对题每对 right 为该词真实词义（修复答案键错位）');
 assert(queue.slice(0, 5).map(function (q2) { return q2.type; }).join(',') === 'choice,choice,spelling,choice,choice',
   '题型轮转（看词选义 / 看义选词 / 拼写）');
 
@@ -180,6 +190,14 @@ var correctId = ccq.choices.filter(function (c) { return c.correct; })[0].id;
 var wrongId = ccq.choices.filter(function (c) { return !c.correct; })[0].id;
 assert(Questions.check(ccq, correctId).correct, '选择题正确答案判定');
 assert(!Questions.check(ccq, wrongId).correct, '选择题错误答案判定');
+
+var rq = Questions.genRetry(sq, allWords);
+assert(rq && rq.type === 'choice', '拼写错题换题型重问 → 选择题');
+assert(rq.wordId === sq.wordId, '重问题指向同一个词');
+var rq2 = Questions.genRetry(ccq, allWords);
+assert(rq2 && rq2.type === 'choice' && rq2.direction === 'm2w', '看词选义错题 → 换为看义选词重问');
+var rq3 = Questions.genRetry(Questions.genChoice(allWords[0], allWords, 'm2w'), allWords);
+assert(rq3 && rq3.type === 'choice' && rq3.direction === 'w2m', '看义选词错题 → 换为看词选义重问');
 
 console.log('\n== Importer ==');
 var parsed = Importer.parseText(
