@@ -1,9 +1,7 @@
-/* 词趣 WordFun — 导入导出：文本/CSV 解析、编码检测、CSV 导出 */
+/* 词趣 WordFun — 导入导出：文本/CSV 解析（按天 3 列 / 单词+词义 2 列）、编码检测、CSV 导出 */
 window.Importer = (function () {
   'use strict';
 
-  var HEADER_WORD = ['word', '单词', '英文', '词汇'];
-  var HEADER_MEAN = ['meaning', '词义', '中文', '释义', '意思'];
   var MAX_FILE_SIZE = 1024 * 1024; // 1MB
 
   // 去首尾成对引号（含中文引号）
@@ -50,44 +48,36 @@ window.Importer = (function () {
     return String(s).replace(/，/g, ',').replace(/“/g, '"').replace(/”/g, '"');
   }
 
-  function isHeaderLine(line) {
-    var f1 = '', f2 = '';
-    if (line.indexOf('|') !== -1) {
-      var p = line.split('|');
-      f1 = stripQuotes(p[0]).toLowerCase();
-      f2 = stripQuotes(p[1] || '').toLowerCase();
-    } else if (line.indexOf(',') !== -1 || line.indexOf('，') !== -1) {
-      var f = parseCSVLine(normalizeFullWidth(line));
-      f1 = stripQuotes(f[0]).toLowerCase();
-      f2 = stripQuotes(f[1] || '').toLowerCase();
-    } else {
-      return false;
-    }
-    return HEADER_WORD.indexOf(f1) !== -1 && HEADER_MEAN.indexOf(f2) !== -1;
+  // 从「第N天 Unit X Lesson Y」提取天数
+  function parseDay(cell) {
+    var m = String(cell || '').match(/第\s*(\d+)\s*天/);
+    return m ? parseInt(m[1], 10) : 0;
   }
 
-  // 单行解析：| 管道格式优先，其次逗号格式（最多 2 有效字段），否则整行视为单词
+  // 表头启发式：同时含「单词」类与「词义」类字段即视为表头
+  function isHeaderLine(line) {
+    var fields = parseCSVLine(normalizeFullWidth(line)).map(function (s) { return s.toLowerCase(); });
+    if (fields.length < 2) return false;
+    var hasWord = fields.some(function (s) { return /单词|word|英文|词汇/.test(s); });
+    var hasMean = fields.some(function (s) { return /词义|释义|中文|意思|meaning/.test(s); });
+    return hasWord && hasMean;
+  }
+
+  // 单行解析：3 列（所属天/单元,单词,词义）→ 带 day；否则 2 列（单词,词义）
   function parseLine(line) {
-    if (line.indexOf('|') !== -1) {
-      var parts = line.split('|').map(stripQuotes);
+    var fields = parseCSVLine(normalizeFullWidth(line));
+    if (fields.length >= 3 && parseDay(fields[0]) > 0) {
       return {
-        word: parts[0] || '',
-        phonetic: parts[1] || '',
-        meaning: parts[2] || '',
-        example: parts.slice(3).join('|').trim()
+        day: parseDay(fields[0]),
+        word: fields[1] || '',
+        meaning: fields.slice(2).map(stripQuotes).filter(Boolean).join('，')
       };
     }
-    if (line.indexOf(',') !== -1 || line.indexOf('，') !== -1) {
-      var fields = parseCSVLine(normalizeFullWidth(line));
-      var meaningParts = fields.slice(1).map(stripQuotes).filter(Boolean);
-      return {
-        word: stripQuotes(fields[0] || ''),
-        phonetic: '',
-        meaning: meaningParts.join(', '),
-        example: ''
-      };
-    }
-    return { word: stripQuotes(line), phonetic: '', meaning: '', example: '' };
+    return {
+      day: 0,
+      word: stripQuotes(fields[0] || ''),
+      meaning: fields.slice(1).map(stripQuotes).filter(Boolean).join('，')
+    };
   }
 
   // 整体解析：去 BOM → 分行 → 跳表头 → 逐行规范化
@@ -105,7 +95,12 @@ window.Importer = (function () {
         return;
       }
       var p = parseLine(line);
-      var word = Store.normalizeWord(p.word);
+      var word = Store.normalizeWord(p.word); // 去派生词标记 *、小写化
+      if (!word) {
+        // 单元标头行（如「第1天 Unit 1 Lesson 1,,」）无单词，静默跳过
+        skipped.push({ lineNo: lineNo, line: line, reason: '单元标头（无单词）' });
+        return;
+      }
       if (!Store.isValidWord(word)) {
         skipped.push({ lineNo: lineNo, line: line, reason: '单词格式不合法' });
         return;
@@ -115,25 +110,25 @@ window.Importer = (function () {
         skipped.push({ lineNo: lineNo, line: line, reason: '缺少词义' });
         return;
       }
-      rows.push({
-        word: word,
-        phonetic: String(p.phonetic || '').trim(),
-        meaning: meaning,
-        example: String(p.example || '').trim()
-      });
+      rows.push({ word: word, meaning: meaning, day: p.day });
     });
 
     return { rows: rows, skipped: skipped };
   }
 
-  // 批量合并入库（去重合并逻辑在 Store.addWord）
+  // 批量合并入库（去重合并逻辑在 Store.addWord；批量期间只落盘一次）
   function mergeIntoStore(rows) {
     var added = 0, updated = 0;
-    rows.forEach(function (r) {
-      var res = Store.addWord(r);
-      if (res.status === 'added') added++;
-      else if (res.status === 'updated') updated++;
-    });
+    Store.beginBatch();
+    try {
+      rows.forEach(function (r) {
+        var res = Store.addWord(r);
+        if (res.status === 'added') added++;
+        else if (res.status === 'updated') updated++;
+      });
+    } finally {
+      Store.endBatch();
+    }
     return { added: added, updated: updated };
   }
 
@@ -152,15 +147,16 @@ window.Importer = (function () {
     return text;
   }
 
-  // CSV 词表导出（BOM 头保证 Excel 中文不乱码）
+  // CSV 词表导出（BOM 头保证 Excel 中文不乱码；含天数列，重新导入可还原天数）
   function exportCSV(words) {
     function esc(s) {
       s = String(s || '');
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     }
-    var lines = ['word,phonetic,meaning,example'];
+    var lines = ['所属天/单元,单词,词义'];
     words.forEach(function (w) {
-      lines.push([w.word, w.phonetic, w.meaning, w.example].map(esc).join(','));
+      var dayLabel = w.day ? '第' + w.day + '天' : '';
+      lines.push([dayLabel, w.word, w.meaning].map(esc).join(','));
     });
     return '﻿' + lines.join('\r\n');
   }
@@ -169,6 +165,7 @@ window.Importer = (function () {
     parseText: parseText,
     parseLine: parseLine,
     parseCSVLine: parseCSVLine,
+    parseDay: parseDay,
     mergeIntoStore: mergeIntoStore,
     fileToText: fileToText,
     exportCSV: exportCSV

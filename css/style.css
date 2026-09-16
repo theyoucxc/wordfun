@@ -103,6 +103,7 @@ body.in-practice .topbar { display: none; }
 .btn-danger:hover { background: #C7443F; border-color: #C7443F; }
 .btn-lg { width: 100%; padding: 14px; font-size: 17px; font-weight: 600; border-radius: 10px; }
 .btn-sm { padding: 5px 12px; font-size: 13px; }
+.resume-btn { width: 100%; margin-top: 12px; padding: 12px; font-weight: 600; color: var(--accent-dark); border-color: var(--accent); }
 
 /* ===== 表单 ===== */
 .input {
@@ -184,7 +185,7 @@ body.in-practice .topbar { display: none; }
 .lib-main { flex: 1; min-width: 0; }
 .lib-wordline { display: flex; align-items: baseline; gap: 8px; }
 .lib-word { font-size: 16px; font-weight: 700; }
-.lib-phonetic { font-size: 13px; color: var(--muted); }
+.lib-day { font-size: 11px; color: var(--accent-dark); background: var(--accent-bg); border-radius: 6px; padding: 1px 6px; }
 .lib-meaning { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-meta { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
 .lib-due { font-size: 11px; color: var(--muted); }

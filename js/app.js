@@ -26,9 +26,41 @@ window.App = (function () {
     };
   }
 
+  // 会话进度落盘：中途退出/刷新后可继续
+  function persist() {
+    if (S) Store.saveSession(S);
+  }
+
+  // 载入内置知识库（data/kb.js 里的 window.WORDFUN_KBS）：按名去重，只导入尚未载入过的；
+  // 天数做偏移，让后续新增的知识库接在前一个的天数之后，避免「第 N 天」冲突
+  function seedKnowledgeBase() {
+    var kbs = window.WORDFUN_KBS || [];
+    if (!kbs.length) return;
+    var seeded = Store.getSeededKBs();
+    var changed = false;
+    kbs.forEach(function (kb) {
+      if (seeded.indexOf(kb.name) !== -1) return;
+      var maxDay = 0;
+      Store.getWords().forEach(function (w) { if (w.day > maxDay) maxDay = w.day; });
+      var parsed = Importer.parseText(kb.text);
+      if (parsed.rows.length) {
+        var offset = maxDay;
+        parsed.rows.forEach(function (r) { if (r.day > 0) r.day += offset; });
+        var res = Importer.mergeIntoStore(parsed.rows);
+        seeded.push(kb.name);
+        changed = true;
+        if (res.added || res.updated) {
+          UI.toast('已载入知识库「' + kb.name + '」：新增 ' + res.added + ' · 更新 ' + res.updated);
+        }
+      }
+    });
+    if (changed) Store.setSeededKBs(seeded);
+  }
+
   // ===== 初始化 =====
   function init() {
     Store.load();
+    seedKnowledgeBase();
 
     if (Store.isBroken()) {
       var bar = document.getElementById('warning-bar');
@@ -125,6 +157,7 @@ window.App = (function () {
     };
     UI.renderQuestion(S.current, h);
     if (S.current.autoSpeak) TTS.speak(S.current.word);
+    persist();
   }
 
   // ===== 判定与落库 =====
@@ -186,6 +219,7 @@ window.App = (function () {
     S.byType[q.type].t++;
     if (correct) S.byType[q.type].c++;
     if (!correct) S.requeue.push(q); // 错题结尾重问一次
+    persist();
   }
 
   function proceed(q, correct, type) {
@@ -211,6 +245,7 @@ window.App = (function () {
     });
     S.answeredScreens++;
     UI.updateProgress(S.answeredScreens, S.totalScreens);
+    persist();
     nextQuestion();
   }
 
@@ -231,6 +266,7 @@ window.App = (function () {
       newLearned: S.newLearned,
       durationMs: Date.now() - S.startedAt
     });
+    Store.clearSession();
     S = null;
   }
 
@@ -238,7 +274,7 @@ window.App = (function () {
   function confirmAbandon() {
     UI.confirm({
       title: '退出练习',
-      message: '本次练习的进度将不保存，确定退出吗？',
+      message: '进度已自动保存，退出后可从首页「继续上次练习」接着学。',
       confirmText: '退出',
       onConfirm: function () {
         TTS.cancel();
@@ -246,6 +282,20 @@ window.App = (function () {
         goHome();
       }
     });
+  }
+
+  function resumeSession() {
+    var saved = Store.getSession();
+    if (!saved || !saved.queue || !saved.queue.length) {
+      UI.toast('没有可继续的练习');
+      return;
+    }
+    TTS.cancel();
+    S = saved;
+    UI.showView('practice');
+    UI.renderPracticeHeader(S.totalScreens);
+    UI.updateProgress(S.answeredScreens, S.totalScreens);
+    showCurrent();
   }
 
   function toggleTTS() {
@@ -266,6 +316,7 @@ window.App = (function () {
     init: init,
     refresh: refresh,
     startSession: startSession,
+    resumeSession: resumeSession,
     confirmAbandon: confirmAbandon,
     toggleTTS: toggleTTS,
     goHome: goHome

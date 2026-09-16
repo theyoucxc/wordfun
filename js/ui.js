@@ -200,25 +200,31 @@ window.UI = (function () {
       view.append(el('div', 'hint-bar', '当前浏览器不支持语音朗读，听音题将自动替换为选择题'));
     }
 
-    // 今日卡片
-    var settings = Store.getSettings();
-    var today = Store.dateKey(new Date(now));
-    var learned = Store.todayLearned(today);
+    // 今日卡片（按 CSV 天数规划）
     var session = SRS.buildSession(now);
+    var studyDay = session ? session.studyDay : SRS.currentStudyDay();
+    var dayLabel = studyDay > 0 ? '第 ' + studyDay + ' 天' : '自由词';
 
     var card = el('div', 'card today-card');
-    card.append(
-      el('div', 'today-label', '今日待复习'),
-      el('div', 'today-num', String(session ? session.dueTotal : 0))
-    );
+    card.append(el('div', 'today-label', '今天 · ' + dayLabel));
+    card.append(el('div', 'today-num', String(session ? session.newTotal : 0)));
     card.append(el('div', 'today-sub',
-      '今日新词 ' + learned + ' / ' + settings.dailyNewWords +
+      '待学新词 ' + (session ? session.newTotal : 0) +
+      ' · 待复习 ' + (session ? session.dueTotal : 0) +
       (session ? '' : ' · 今日任务全部完成')));
     var startBtn = btn(session ? '开始练习' : '今日任务完成', 'btn-primary btn-lg');
     if (!session) startBtn.disabled = true;
     else startBtn.addEventListener('click', function () { window.App.startSession(); });
     card.append(startBtn);
     view.append(card);
+
+    // 上次未完成的练习（可继续）
+    var saved = Store.getSession();
+    if (saved && saved.queue && saved.queue.length) {
+      var resumeBtn = btn('继续上次练习', 'resume-btn');
+      resumeBtn.addEventListener('click', function () { window.App.resumeSession(); });
+      view.append(resumeBtn);
+    }
 
     // 统计行
     var summary = Store.getSummary();
@@ -342,9 +348,8 @@ window.UI = (function () {
     var main = el('div', 'lib-main');
     var wordline = el('div', 'lib-wordline');
     wordline.append(el('span', 'lib-word', w.word));
-    if (w.phonetic) wordline.append(el('span', 'lib-phonetic', w.phonetic));
+    if (w.day > 0) wordline.append(el('span', 'lib-day', '第' + w.day + '天'));
     main.append(wordline, el('div', 'lib-meaning', w.meaning));
-    if (w.example) main.append(el('div', 'lib-phonetic', w.example));
 
     var meta = el('div', 'lib-meta');
     var badge = el('span', 'badge b' + w.box, String(w.box));
@@ -399,17 +404,13 @@ window.UI = (function () {
         form.id = FORM_ID;
         form.append(
           mkField('单词', mkInput({ placeholder: '如 apple', required: true, maxlength: 40, value: isEdit ? word.word : '' })),
-          mkField('音标（可选）', mkInput({ placeholder: '/ˈæpl/', maxlength: 100, value: isEdit ? word.phonetic : '' })),
-          mkField('词义', mkInput({ placeholder: '如 n. 苹果', required: true, maxlength: 500, value: isEdit ? word.meaning : '' })),
-          mkField('例句（可选）', mkInput({ placeholder: '如 I ate an apple.', maxlength: 300, value: isEdit ? word.example : '' }))
+          mkField('词义', mkInput({ placeholder: '如 n. 苹果', required: true, maxlength: 500, value: isEdit ? word.meaning : '' }))
         );
         form.addEventListener('submit', function (e) {
           e.preventDefault();
           var fields = {
             word: form.elements[0].value,
-            phonetic: form.elements[1].value,
-            meaning: form.elements[2].value,
-            example: form.elements[3].value
+            meaning: form.elements[1].value
           };
           if (isEdit) {
             if (!Store.updateWord(word.id, fields)) { toast('单词格式不合法'); return; }
@@ -444,14 +445,14 @@ window.UI = (function () {
       build: function (body) {
         body.append(el('div', 'import-help',
           '每行一个单词，支持以下格式：\n' +
-          '· 单词,词义\n' +
-          '· 单词|音标|词义|例句\n' +
+          '· 所属天/单元,单词,词义（课程 CSV，如「第1天 Unit 1 Lesson 1,act,v.行动」）\n' +
+          '· 单词,词义（无天数的自由词）\n' +
           '· CSV 文件（Excel 可另存为 CSV 后导入）\n' +
-          '重复导入的单词会自动合并，不会丢失学习进度。'));
+          '带 * 的派生词会自动去掉 *；重复导入的单词会自动合并，不会丢失学习进度。'));
 
         ta = document.createElement('textarea');
         ta.className = 'input import-textarea';
-        ta.placeholder = 'apple,n. 苹果\nbook|/bʊk/|n. 书|I read a book.';
+        ta.placeholder = '第1天 Unit 1 Lesson 1,act,v.行动\napple,n. 苹果';
         body.append(ta);
 
         var fileRow = el('div', 'import-file-row');
@@ -553,16 +554,6 @@ window.UI = (function () {
         var g2 = el('div', 'set-group');
         g2.append(el('div', 'set-group-title', '学习'));
 
-        var row3 = el('div', 'set-row');
-        row3.append(el('div', 'set-row-label', '每日新词上限'));
-        var inpDaily = document.createElement('input');
-        inpDaily.type = 'number';
-        inpDaily.min = '1';
-        inpDaily.max = '50';
-        inpDaily.value = String(s.dailyNewWords);
-        row3.append(inpDaily);
-        g2.append(row3);
-
         var row4 = el('div', 'set-row');
         row4.append(el('div', 'set-row-label', '每场练习词数'));
         var inpSession = document.createElement('input');
@@ -609,9 +600,6 @@ window.UI = (function () {
           Store.setSettings({ ttsRate: parseFloat(rateRange.value) });
         });
         testBtn.addEventListener('click', function () { TTS.speak('hello'); });
-        inpDaily.addEventListener('change', function () {
-          Store.setSettings({ dailyNewWords: Number(inpDaily.value) });
-        });
         inpSession.addEventListener('change', function () {
           Store.setSettings({ sessionSize: Number(inpSession.value) });
         });

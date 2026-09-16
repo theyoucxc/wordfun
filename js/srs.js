@@ -1,4 +1,4 @@
-/* 词趣 WordFun — 间隔重复（Leitner 盒子）：间隔表、答题更新、会话选词、相对时间文案 */
+/* 词趣 WordFun — 间隔重复（Leitner 盒子）：间隔表、答题更新、按天会话选词、相对时间文案 */
 window.SRS = (function () {
   'use strict';
 
@@ -16,6 +16,22 @@ window.SRS = (function () {
 
   function isFresh(w) {
     return w.box === 0 && w.correctCount === 0;
+  }
+
+  // 当前学习天 = 仍有未学新词的最小 day（学完当天自动进入下一天）；
+  // 全学完则取最大 day；无课程（全是 day=0 自由词）时为 0
+  function currentStudyDay() {
+    var words = Store.getWords();
+    var minDay = Infinity, maxDay = 0, anyFresh = false;
+    words.forEach(function (w) {
+      if (w.day > maxDay) maxDay = w.day;
+      if (isFresh(w)) {
+        anyFresh = true;
+        if (w.day > 0 && w.day < minDay) minDay = w.day;
+      }
+    });
+    if (!anyFresh) return maxDay;
+    return minDay === Infinity ? maxDay : minDay;
   }
 
   // 答对/答错更新并落库，返回 { wordId, word, fromBox, toBox, correct }；词不存在返回 null
@@ -44,19 +60,22 @@ window.SRS = (function () {
     return { wordId: id, word: w.word, fromBox: fromBox, toBox: w.box, correct: isCorrect };
   }
 
-  // 会话选词：80% 到期词优先 + 20% 新词（受每日上限约束）；无词可练返回 null
+  // 会话选词（按天）：新词 = 当前天及之前尚未学过的词（含 day=0 自由词），
+  // 复习 = 到期词优先、最多占一半，剩余名额给新词；无词可练返回 null
   function buildSession(now) {
     var settings = Store.getSettings();
     var words = Store.getWords();
     if (!words.length) return null;
 
-    var today = Store.dateKey(new Date(now));
-    var quotaLeft = Math.max(0, settings.dailyNewWords - Store.todayLearned(today));
+    var studyDay = currentStudyDay();
 
     var due = [], fresh = [];
     words.forEach(function (w) {
-      if (isFresh(w)) fresh.push(w);
-      else if (isDue(w, now)) due.push(w);
+      if (isFresh(w)) {
+        if (w.day <= studyDay) fresh.push(w);
+      } else if (isDue(w, now)) {
+        due.push(w);
+      }
     });
 
     due.sort(function (a, b) {
@@ -67,20 +86,24 @@ window.SRS = (function () {
       if (a.box !== b.box) return a.box - b.box;
       return b.wrongCount - a.wrongCount;
     });
-    fresh.sort(function (a, b) { return a.createdAt - b.createdAt; });
+    fresh.sort(function (a, b) {
+      if (a.day !== b.day) return a.day - b.day;
+      return a.createdAt - b.createdAt;
+    });
 
-    var size = Math.min(settings.sessionSize, due.length + Math.min(fresh.length, quotaLeft));
-    if (!size) return null;
-
-    var targetNew = Math.min(Math.round(size * 0.2), quotaLeft);
-    var dueCount = Math.min(due.length, size - targetNew);
-    var newCount = Math.min(size - dueCount, fresh.length, quotaLeft);
+    var size = settings.sessionSize;
+    var dueCount = Math.min(due.length, Math.ceil(size / 2));
+    var newCount = Math.min(size - dueCount, fresh.length);
+    // 新词不足时，把剩余名额还给复习
+    if (newCount < size - dueCount) {
+      dueCount = Math.min(due.length, size - newCount);
+    }
     if (dueCount === 0 && newCount === 0) return null;
 
     var selected = due.slice(0, dueCount).concat(fresh.slice(0, newCount));
     return {
       words: selected,
-      quotaLeft: quotaLeft,
+      studyDay: studyDay,
       dueTotal: due.length,
       newTotal: fresh.length
     };
@@ -99,6 +122,7 @@ window.SRS = (function () {
     INTERVALS_DAYS: INTERVALS_DAYS,
     isDue: isDue,
     isFresh: isFresh,
+    currentStudyDay: currentStudyDay,
     applyAnswer: applyAnswer,
     buildSession: buildSession,
     relativeTimeText: relativeTimeText

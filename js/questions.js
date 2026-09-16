@@ -40,7 +40,7 @@ window.Questions = (function () {
     });
   }
 
-  // 四选一：direction 'w2m' 看词选义 / 'm2w' 看义选词；库不足 2 词或词义为空返回 null
+  // 四选一：direction 'w2m' 看词选义（题干=单词，选项=词义）/ 'm2w' 看义选词（题干=词义，选项=单词）
   function genChoice(word, allWords, direction) {
     if (!word.meaning) return null;
     var field = direction === 'w2m' ? 'meaning' : 'word';
@@ -53,9 +53,9 @@ window.Questions = (function () {
       direction: direction,
       wordId: word.id,
       word: word.word,
-      promptText: correct.text,
-      subText: direction === 'w2m' ? word.phonetic : '',
-      autoSpeak: direction === 'w2m',
+      promptText: direction === 'w2m' ? word.word : word.meaning,
+      subText: '',
+      autoSpeak: false,
       choices: buildChoices(correct, dist.slice(0, 3)),
       answer: ''
     };
@@ -79,7 +79,7 @@ window.Questions = (function () {
     };
   }
 
-  // 拼写：显示词义（+例句），朗读，用户拼写
+  // 拼写：显示词义，朗读，用户拼写
   function genSpelling(word) {
     if (!word.meaning) return null;
     return {
@@ -88,7 +88,7 @@ window.Questions = (function () {
       wordId: word.id,
       word: word.word,
       promptText: word.meaning,
-      subText: word.example || '',
+      subText: '',
       autoSpeak: true,
       choices: null,
       answer: word.word

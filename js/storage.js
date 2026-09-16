@@ -1,24 +1,22 @@
-/* 词趣 WordFun — 数据层：localStorage 读写、数据模型、词 CRUD、设置、统计、备份 */
+/* 词趣 WordFun — 数据层：localStorage 读写、数据模型、词 CRUD、设置、统计、备份、会话恢复 */
 window.Store = (function () {
   'use strict';
 
   var KEY = 'wordfun.data';
   var MAX_MEANING = 500;
-  var MAX_PHONETIC = 100;
-  var MAX_EXAMPLE = 300;
   var MAX_DAILY_KEYS = 365;
 
   var data = null;
   var broken = false;
+  var suspend = false; // 批量导入期间暂停每次落盘
 
   function defaults() {
     return {
-      version: 1,
+      version: 2,
       words: {},
       settings: {
         ttsEnabled: true,
         ttsRate: 0.9,
-        dailyNewWords: 10,
         sessionSize: 10
       },
       stats: {
@@ -27,23 +25,40 @@ window.Store = (function () {
         totalCorrect: 0,
         totalSessions: 0
       },
-      meta: { createdAt: Date.now(), lastBackupAt: 0, lastStudyAt: 0 }
+      meta: { createdAt: Date.now(), lastBackupAt: 0, lastStudyAt: 0, seededKBs: [] }
     };
   }
 
-  // 迁移：v1 为当前版本，仅做字段防御性补齐，未来版本在此按 version 分支
+  // 迁移：v1 → v2 去掉音标/例句，单词增加 day（默认 0 = 自由词）；未来版本按 version 分支
   function migrate(raw) {
     var d = defaults();
     if (!raw || typeof raw !== 'object') return d;
-    if (raw.words && typeof raw.words === 'object') d.words = raw.words;
-    if (raw.settings && typeof raw.settings === 'object') {
-      Object.assign(d.settings, raw.settings);
+    if (raw.words && typeof raw.words === 'object') {
+      for (var id in raw.words) {
+        var w = raw.words[id];
+        if (!w || typeof w !== 'object') continue;
+        d.words[id] = {
+          id: w.id || id,
+          word: String(w.word || ''),
+          meaning: String(w.meaning || ''),
+          day: (typeof w.day === 'number' && w.day > 0) ? w.day : 0,
+          box: w.box || 0,
+          nextReviewAt: w.nextReviewAt || 0,
+          correctCount: w.correctCount || 0,
+          wrongCount: w.wrongCount || 0,
+          streak: w.streak || 0,
+          createdAt: w.createdAt || Date.now(),
+          updatedAt: w.updatedAt || Date.now()
+        };
+      }
     }
+    if (raw.settings && typeof raw.settings === 'object') Object.assign(d.settings, raw.settings);
     if (raw.stats && typeof raw.stats === 'object') {
       Object.assign(d.stats, raw.stats);
       if (!d.stats.daily || typeof d.stats.daily !== 'object') d.stats.daily = {};
     }
     if (raw.meta && typeof raw.meta === 'object') Object.assign(d.meta, raw.meta);
+    if (!Array.isArray(d.meta.seededKBs)) d.meta.seededKBs = [];
     return d;
   }
 
@@ -60,7 +75,7 @@ window.Store = (function () {
   }
 
   function save() {
-    if (broken) return false;
+    if (broken || suspend) return false;
     try {
       localStorage.setItem(KEY, JSON.stringify(data));
       return true;
@@ -70,7 +85,17 @@ window.Store = (function () {
     }
   }
 
-  // 供 storage 事件后重新读取
+  // 批量写：期间暂停每次 save，结束统一落盘一次（导入大量词时避免频繁序列化）
+  function beginBatch() {
+    load();
+    suspend = true;
+  }
+
+  function endBatch() {
+    suspend = false;
+    save();
+  }
+
   function reload() {
     data = null;
     load();
@@ -79,13 +104,23 @@ window.Store = (function () {
   function isBroken() { return broken; }
 
   // ===== 单词规范化 =====
+  // 去重音符号、去带圈序号（lie①→lie）、去派生词标记 *、折叠空白、小写
   function normalizeWord(raw) {
     if (typeof raw !== 'string') return '';
-    return raw.trim().replace(/\s+/g, ' ').toLowerCase();
+    var s = raw;
+    if (typeof s.normalize === 'function') s = s.normalize('NFD');
+    return s
+      .replace(/[̀-ͯ]/g, '')   // 重音符号：résumé → resume
+      .replace(/[①-⑳]/g, '')   // 带圈序号：lie① → lie
+      .trim()
+      .replace(/^\*+/, '')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
   }
 
+  // 允许 behave(u)r / practise/-ice 这类变体写法（括号与斜杠）
   function isValidWord(w) {
-    return /^[a-z][a-z' .-]{0,39}$/.test(w);
+    return /^[a-z][a-z()\/' .-]{0,39}$/.test(w);
   }
 
   function genId() {
@@ -116,7 +151,11 @@ window.Store = (function () {
   // ===== 词 CRUD =====
   function getWords() {
     load();
-    return Object.values(data.words).sort(function (a, b) { return b.createdAt - a.createdAt; });
+    // 按天升序、同天按导入顺序（createdAt 升序）——保持课程顺序
+    return Object.values(data.words).sort(function (a, b) {
+      if (a.day !== b.day) return a.day - b.day;
+      return a.createdAt - b.createdAt;
+    });
   }
 
   function getWord(id) {
@@ -131,19 +170,17 @@ window.Store = (function () {
     if (!isValidWord(w)) {
       return { status: 'skipped', reason: '单词格式不合法：' + String(fields.word || '').slice(0, 20) };
     }
-    var phonetic = String(fields.phonetic || '').trim().slice(0, MAX_PHONETIC);
     var meaning = String(fields.meaning || '').trim().slice(0, MAX_MEANING);
-    var example = String(fields.example || '').trim().slice(0, MAX_EXAMPLE);
+    var day = Math.max(0, Math.min(999, Math.round(Number(fields.day) || 0)));
 
     var existing = findWordByWord(w);
     if (existing) {
       var changed = false;
-      if (!existing.phonetic && phonetic) { existing.phonetic = phonetic; changed = true; }
       if (meaning) {
         var merged = mergeMeaning(existing.meaning, meaning);
         if (merged !== existing.meaning) { existing.meaning = merged; changed = true; }
       }
-      if (!existing.example && example) { existing.example = example; changed = true; }
+      if (day > 0 && existing.day === 0) { existing.day = day; changed = true; }
       if (changed) { existing.updatedAt = Date.now(); save(); }
       return { status: 'updated', wordId: existing.id };
     }
@@ -153,9 +190,8 @@ window.Store = (function () {
     data.words[id] = {
       id: id,
       word: w,
-      phonetic: phonetic,
       meaning: meaning,
-      example: example,
+      day: day,
       box: 0,
       nextReviewAt: 0,
       correctCount: 0,
@@ -168,7 +204,7 @@ window.Store = (function () {
     return { status: 'added', wordId: id };
   }
 
-  // 编辑：只允许改 word/phonetic/meaning/example；word 规范化后若撞库合并词义
+  // 编辑：只允许改 word/meaning/day 及 SRS 字段；word 规范化后若撞库合并词义
   function updateWord(id, fields) {
     load();
     var w = data.words[id];
@@ -179,10 +215,8 @@ window.Store = (function () {
       if (!isValidWord(nw)) return false;
       w.word = nw;
     }
-    if (typeof fields.phonetic === 'string') w.phonetic = fields.phonetic.trim().slice(0, MAX_PHONETIC);
     if (typeof fields.meaning === 'string') w.meaning = fields.meaning.trim().slice(0, MAX_MEANING);
-    if (typeof fields.example === 'string') w.example = fields.example.trim().slice(0, MAX_EXAMPLE);
-    // SRS 字段（srs.js 使用）
+    if (typeof fields.day === 'number') w.day = Math.max(0, Math.min(999, Math.round(fields.day)));
     if (typeof fields.box === 'number') w.box = fields.box;
     if (typeof fields.nextReviewAt === 'number') w.nextReviewAt = fields.nextReviewAt;
     if (typeof fields.correctCount === 'number') w.correctCount = fields.correctCount;
@@ -217,13 +251,11 @@ window.Store = (function () {
       return Math.min(max, Math.max(min, isFinite(n) ? n : def));
     }
     s.ttsRate = clampNum(s.ttsRate, 0.5, 1.5, 0.9);
-    s.dailyNewWords = Math.round(clampNum(s.dailyNewWords, 1, 50, 10));
     s.sessionSize = Math.round(clampNum(s.sessionSize, 5, 30, 10));
     save();
   }
 
   // ===== 统计 =====
-  // 本地日期键 'YYYY-MM-DD'（不用 toISOString，避免时区偏移）
   function dateKey(d) {
     var t = d || new Date();
     var p = function (n) { return String(n).padStart(2, '0'); };
@@ -280,12 +312,44 @@ window.Store = (function () {
     return { total: words.length, mastered: mastered, accuracy: accuracy };
   }
 
+  // ===== 会话恢复 =====
+  function saveSession(s) {
+    load();
+    data.session = s;
+    save();
+  }
+
+  function getSession() {
+    load();
+    return data.session || null;
+  }
+
+  function clearSession() {
+    load();
+    if (data.session) {
+      delete data.session;
+      save();
+    }
+  }
+
+  // ===== 知识库载入记录（按名去重，避免重复导入） =====
+  function getSeededKBs() {
+    load();
+    return data.meta.seededKBs;
+  }
+
+  function setSeededKBs(arr) {
+    load();
+    data.meta.seededKBs = arr;
+    save();
+  }
+
   // ===== 备份 =====
   function exportJSON() {
     load();
     return JSON.stringify({
       app: 'wordfun',
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       data: data
     }, null, 2);
@@ -316,6 +380,8 @@ window.Store = (function () {
     save: save,
     reload: reload,
     isBroken: isBroken,
+    beginBatch: beginBatch,
+    endBatch: endBatch,
     normalizeWord: normalizeWord,
     isValidWord: isValidWord,
     mergeMeaning: mergeMeaning,
@@ -332,6 +398,11 @@ window.Store = (function () {
     recordSession: recordSession,
     todayLearned: todayLearned,
     getSummary: getSummary,
+    saveSession: saveSession,
+    getSession: getSession,
+    clearSession: clearSession,
+    getSeededKBs: getSeededKBs,
+    setSeededKBs: setSeededKBs,
     exportJSON: exportJSON,
     importJSON: importJSON,
     clearAll: clearAll
