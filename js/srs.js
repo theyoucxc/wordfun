@@ -34,6 +34,19 @@ window.SRS = (function () {
     return minDay === Infinity ? maxDay : minDay;
   }
 
+  // 生效的学习天：手动跳转（meta.studyDay > 0）优先，否则自动跟随进度
+  function effectiveStudyDay() {
+    var override = Store.getStudyDay();
+    return override > 0 ? override : currentStudyDay();
+  }
+
+  // 某天尚未学过的新词数（用于判断当天是否学完、是否顺延到下一天）
+  function freshInDay(day) {
+    return Store.getWords().filter(function (w) {
+      return w.day === day && isFresh(w);
+    }).length;
+  }
+
   // 答对/答错更新并落库，返回 { wordId, word, fromBox, toBox, correct }；词不存在返回 null
   function applyAnswer(id, isCorrect, now) {
     var w = Store.getWord(id);
@@ -60,19 +73,19 @@ window.SRS = (function () {
     return { wordId: id, word: w.word, fromBox: fromBox, toBox: w.box, correct: isCorrect };
   }
 
-  // 会话选词（按天）：新词 = 当前天及之前尚未学过的词（含 day=0 自由词），
+  // 会话选词（按天）：新词 = 当前学习天（或 day=0 自由词）尚未学过的词，
   // 复习 = 到期词优先、最多占一半，剩余名额给新词；无词可练返回 null
   function buildSession(now) {
     var settings = Store.getSettings();
     var words = Store.getWords();
     if (!words.length) return null;
 
-    var studyDay = currentStudyDay();
+    var studyDay = effectiveStudyDay();
 
     var due = [], fresh = [];
     words.forEach(function (w) {
       if (isFresh(w)) {
-        if (w.day <= studyDay) fresh.push(w);
+        if (w.day === studyDay || w.day === 0) fresh.push(w);
       } else if (isDue(w, now)) {
         due.push(w);
       }
@@ -123,6 +136,8 @@ window.SRS = (function () {
     isDue: isDue,
     isFresh: isFresh,
     currentStudyDay: currentStudyDay,
+    effectiveStudyDay: effectiveStudyDay,
+    freshInDay: freshInDay,
     applyAnswer: applyAnswer,
     buildSession: buildSession,
     relativeTimeText: relativeTimeText

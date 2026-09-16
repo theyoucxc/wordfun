@@ -13,7 +13,7 @@ global.localStorage = {
   removeItem: function (k) { backing.delete(k); }
 };
 
-['storage.js', 'srs.js', 'questions.js', 'tts.js', 'import.js'].forEach(function (f) {
+['storage.js', 'srs.js', 'questions.js', 'import.js'].forEach(function (f) {
   var code = fs.readFileSync(path.join(__dirname, 'js', f), 'utf8');
   (0, eval)(code);
 });
@@ -166,8 +166,8 @@ var tenWords = allWords.slice(0, 10);
 var queue = Questions.assemble(tenWords, allWords);
 assert(queue.length === 6, 'assemble(10) = 5 单题 + 1 配对轮：实际 ' + queue.length);
 assert(queue[5].type === 'matching' && queue[5].pairs.length === 5, '配对轮收尾且 5 对');
-assert(queue.slice(0, 5).map(function (q2) { return q2.type; }).join(',') === 'choice,choice,choice,spelling,choice',
-  '题型轮转（TTS 不可用时听音降级为选择题）');
+assert(queue.slice(0, 5).map(function (q2) { return q2.type; }).join(',') === 'choice,choice,spelling,choice,choice',
+  '题型轮转（看词选义 / 看义选词 / 拼写）');
 
 var sq = Questions.genSpelling(allWords[0]);
 assert(sq.subText === '', '拼写题不再显示例句');

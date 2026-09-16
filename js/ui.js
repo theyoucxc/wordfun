@@ -196,17 +196,16 @@ window.UI = (function () {
       return;
     }
 
-    if (!TTS.available()) {
-      view.append(el('div', 'hint-bar', '当前浏览器不支持语音朗读，听音题将自动替换为选择题'));
-    }
-
     // 今日卡片（按 CSV 天数规划）
+    var override = Store.getStudyDay();   // 0 = 自动跟随进度；N = 手动跳转到第 N 天
     var session = SRS.buildSession(now);
-    var studyDay = session ? session.studyDay : SRS.currentStudyDay();
+    var studyDay = SRS.effectiveStudyDay();
+    var maxDay = Store.maxStudyDay();
     var dayLabel = studyDay > 0 ? '第 ' + studyDay + ' 天' : '自由词';
 
     var card = el('div', 'card today-card');
     card.append(el('div', 'today-label', '今天 · ' + dayLabel));
+    card.append(buildDayJump(override, maxDay));
     card.append(el('div', 'today-num', String(session ? session.newTotal : 0)));
     card.append(el('div', 'today-sub',
       '待学新词 ' + (session ? session.newTotal : 0) +
@@ -238,6 +237,29 @@ window.UI = (function () {
 
     // 近 7 天柱状图
     view.append(buildChart());
+  }
+
+  // 天数跳跃：下拉选择学习天（「自动」= 跟随进度，学完当天自动进入下一天）
+  function buildDayJump(override, maxDay) {
+    var row = el('div', 'day-jump');
+    var label = el('span', 'day-jump-label', '学习天');
+    var select = document.createElement('select');
+    select.className = 'day-jump-select';
+    function opt(value, text) {
+      var o = document.createElement('option');
+      o.value = String(value);
+      o.textContent = text;
+      return o;
+    }
+    select.append(opt(0, '自动 · 跟随进度'));
+    for (var d = 1; d <= maxDay; d++) select.append(opt(d, '第 ' + d + ' 天'));
+    select.value = String(override);
+    select.addEventListener('change', function () {
+      Store.setStudyDay(Number(select.value));
+      renderDashboard();
+    });
+    row.append(label, select);
+    return row;
   }
 
   function statCard(num, label) {
@@ -520,36 +542,6 @@ window.UI = (function () {
     openModal({
       title: '设置',
       build: function (body) {
-        // 发音
-        var g1 = el('div', 'set-group');
-        g1.append(el('div', 'set-group-title', '发音'));
-
-        var row1 = el('div', 'set-row');
-        var lab1 = el('div', 'set-row-label');
-        lab1.append(el('div', 'set-row-name', '单词发音'), el('div', 'set-row-desc', '练习时自动朗读单词'));
-        var sw = el('label', 'switch');
-        var ttsCheck = document.createElement('input');
-        ttsCheck.type = 'checkbox';
-        ttsCheck.checked = !!s.ttsEnabled;
-        sw.append(ttsCheck, el('span', 'switch-slider'));
-        row1.append(lab1, sw);
-        g1.append(row1);
-
-        var row2 = el('div', 'set-row');
-        var lab2 = el('div', 'set-row-label');
-        lab2.append(el('div', 'set-row-name', '语速'));
-        var rateVal = el('span', 'lib-due', s.ttsRate.toFixed(1) + 'x');
-        var rateRange = document.createElement('input');
-        rateRange.type = 'range';
-        rateRange.min = '0.5';
-        rateRange.max = '1.5';
-        rateRange.step = '0.1';
-        rateRange.value = String(s.ttsRate);
-        var testBtn = btn('试听', 'btn-sm');
-        row2.append(lab2, rateRange, rateVal, testBtn);
-        g1.append(row2);
-        body.append(g1);
-
         // 学习
         var g2 = el('div', 'set-group');
         g2.append(el('div', 'set-group-title', '学习'));
@@ -591,15 +583,6 @@ window.UI = (function () {
         body.append(g4);
 
         // 事件绑定
-        ttsCheck.addEventListener('change', function () {
-          Store.setSettings({ ttsEnabled: ttsCheck.checked });
-          if (!ttsCheck.checked) TTS.cancel();
-        });
-        rateRange.addEventListener('input', function () {
-          rateVal.textContent = parseFloat(rateRange.value).toFixed(1) + 'x';
-          Store.setSettings({ ttsRate: parseFloat(rateRange.value) });
-        });
-        testBtn.addEventListener('click', function () { TTS.speak('hello'); });
         inpSession.addEventListener('change', function () {
           Store.setSettings({ sessionSize: Number(inpSession.value) });
         });
@@ -662,37 +645,16 @@ window.UI = (function () {
     fill.id = 'pbar-fill';
     pbar.append(fill);
     pbarWrap.append(pbar);
-    var spkBtn = btn('', 'icon-btn');
-    spkBtn.id = 'pbar-speaker';
-    spkBtn.addEventListener('click', function () { window.App.toggleTTS(); });
-    head.append(xBtn, pbarWrap, spkBtn);
+    head.append(xBtn, pbarWrap);
 
     var qwrap = el('div', 'q-wrap');
     qwrap.id = 'q-wrap';
     view.append(head, qwrap);
-    updateSpeakerIcon();
   }
 
   function updateProgress(done, total) {
     var fill = document.getElementById('pbar-fill');
     if (fill) fill.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
-  }
-
-  function updateSpeakerIcon() {
-    var b = document.getElementById('pbar-speaker');
-    if (!b) return;
-    var on = Store.getSettings().ttsEnabled;
-    b.innerHTML = on ? ICONS.speaker : ICONS.speakerMute;
-    b.title = on ? '关闭发音' : '开启发音';
-    b.style.color = on ? '' : 'var(--muted)';
-  }
-
-  function speakerButton(handler) {
-    var b = btn('', 'speaker-btn');
-    b.innerHTML = ICONS.speaker;
-    b.setAttribute('aria-label', '播放发音');
-    b.addEventListener('click', handler);
-    return b;
   }
 
   function optionsList(choices, onAnswer) {
@@ -703,6 +665,13 @@ window.UI = (function () {
       wrap.append(b);
     });
     return wrap;
+  }
+
+  function skipButton(onSkip) {
+    var b = btn('跳过此单词', 'skip-btn');
+    b.setAttribute('title', '跳过此题，该词稍后再学');
+    b.addEventListener('click', onSkip);
+    return b;
   }
 
   function renderQuestion(q, h) {
@@ -718,27 +687,11 @@ window.UI = (function () {
     if (q.type === 'choice') {
       card.append(el('div', 'q-prompt', q.promptText));
       if (q.subText) card.append(el('div', 'q-sub', q.subText));
-      if (q.autoSpeak) {
-        var row = el('div', 'q-speak-row');
-        row.append(speakerButton(h.onReplay));
-        card.append(row);
-      }
       card.append(optionsList(q.choices, h.onAnswer));
-    } else if (q.type === 'listening') {
-      var listenRow = el('div', 'q-speak-row');
-      var listenBtn = btn('', 'speaker-btn listen-btn');
-      listenBtn.innerHTML = ICONS.speaker;
-      listenBtn.setAttribute('aria-label', '播放发音');
-      listenBtn.addEventListener('click', h.onReplay);
-      listenRow.append(listenBtn);
-      card.append(listenRow);
-      card.append(optionsList(q.choices, h.onAnswer));
+      card.append(skipButton(h.onSkip));
     } else if (q.type === 'spelling') {
       card.append(el('div', 'q-prompt', q.promptText));
       if (q.subText) card.append(el('div', 'q-sub example', q.subText));
-      var speakRow = el('div', 'q-speak-row');
-      speakRow.append(speakerButton(h.onReplay));
-      card.append(speakRow);
       var form = document.createElement('form');
       var formRow = el('div', 'spell-row');
       var input = mkInput({ placeholder: '输入单词的英文拼写', maxlength: 60 });
@@ -760,6 +713,7 @@ window.UI = (function () {
       formRow.append(input, checkBtn);
       form.append(formRow);
       card.append(form);
+      card.append(skipButton(h.onSkip));
       input.focus();
     } else if (q.type === 'matching') {
       card.append(el('div', 'q-sub', '点击左侧单词，再点击右侧对应的词义'));
@@ -839,9 +793,6 @@ window.UI = (function () {
       el('div', 'q-sub', '拼写错了，照抄一遍这个单词'),
       el('div', 'q-prompt', q.answer)
     );
-    var speakRow = el('div', 'q-speak-row');
-    speakRow.append(speakerButton(function () { TTS.speak(q.word); }));
-    card.append(speakRow);
 
     var form = document.createElement('form');
     var formRow = el('div', 'spell-row');
@@ -900,7 +851,7 @@ window.UI = (function () {
   }
 
   // ===== 总结页 =====
-  var TYPE_NAMES = { choice: '选择题', listening: '听音题', spelling: '拼写题', matching: '配对题' };
+  var TYPE_NAMES = { choice: '选择题', spelling: '拼写题', matching: '配对题' };
 
   function renderSummary(result) {
     var view = getView('practice');
@@ -966,7 +917,6 @@ window.UI = (function () {
     renderLibrary: renderLibrary,
     renderPracticeHeader: renderPracticeHeader,
     updateProgress: updateProgress,
-    updateSpeakerIcon: updateSpeakerIcon,
     renderQuestion: renderQuestion,
     renderSpellCorrection: renderSpellCorrection,
     showFeedback: showFeedback,

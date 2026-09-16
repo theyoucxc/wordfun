@@ -61,25 +61,7 @@ window.Questions = (function () {
     };
   }
 
-  // 听音选义：只朗读不显示单词；词义为空或库不足 2 词返回 null（调用方降级 w2m）
-  function genListening(word, allWords) {
-    if (!word.meaning) return null;
-    var dist = pickDistractors(word, allWords, 'meaning', 3);
-    if (dist.length < 1) return null;
-    return {
-      id: nextId('l'),
-      type: 'listening',
-      wordId: word.id,
-      word: word.word,
-      promptText: '',
-      subText: '',
-      autoSpeak: true,
-      choices: buildChoices({ text: word.meaning }, dist.slice(0, 3)),
-      answer: ''
-    };
-  }
-
-  // 拼写：显示词义，朗读，用户拼写
+  // 拼写：显示词义，用户拼写
   function genSpelling(word) {
     if (!word.meaning) return null;
     return {
@@ -89,7 +71,7 @@ window.Questions = (function () {
       word: word.word,
       promptText: word.meaning,
       subText: '',
-      autoSpeak: true,
+      autoSpeak: false,
       choices: null,
       answer: word.word
     };
@@ -117,7 +99,7 @@ window.Questions = (function () {
     };
   }
 
-  // 会话组装：每 10 词含 1 轮配对（放末尾），其余按 4 题型轮转
+  // 会话组装：每 10 词含 1 轮配对（放末尾），其余按 3 题型轮转（发音功能已暂停，无听音题）
   function assemble(selectedWords, allWords) {
     var n = selectedWords.length;
     var matchingRounds = Math.floor(n / 10);
@@ -125,20 +107,17 @@ window.Questions = (function () {
     var matchingWords = selectedWords.slice(n - matchCount);
     var singleWords = selectedWords.slice(0, n - matchCount);
 
-    var ttsOk = (typeof TTS !== 'undefined') && TTS.available();
-    var pattern = ['w2m', 'm2w', ttsOk ? 'listening' : 'w2m', 'spelling'];
+    var pattern = ['w2m', 'm2w', 'spelling'];
 
     var singles = [];
     singleWords.forEach(function (w, i) {
-      var t = pattern[i % 4];
+      var t = pattern[i % 3];
       var q = null;
       if (t === 'w2m' || t === 'm2w') q = genChoice(w, allWords, t);
-      else if (t === 'listening') q = genListening(w, allWords) || genChoice(w, allWords, 'w2m');
       else q = genSpelling(w);
       if (!q) {
         // 兜底：尝试任意可用题型
-        q = genChoice(w, allWords, 'w2m') || genChoice(w, allWords, 'm2w') ||
-            genSpelling(w) || genListening(w, allWords);
+        q = genChoice(w, allWords, 'w2m') || genChoice(w, allWords, 'm2w') || genSpelling(w);
       }
       if (q) singles.push(q);
     });
@@ -151,7 +130,7 @@ window.Questions = (function () {
     return singles.concat(rounds);
   }
 
-  // 判定：choice/listening 传选项 id；spelling 传用户输入
+  // 判定：choice 传选项 id；spelling 传用户输入
   function check(q, userAnswer) {
     if (q.type === 'spelling') {
       var ok = norm(userAnswer) === norm(q.answer);
@@ -172,7 +151,6 @@ window.Questions = (function () {
     shuffle: shuffle,
     pickDistractors: pickDistractors,
     genChoice: genChoice,
-    genListening: genListening,
     genSpelling: genSpelling,
     genMatching: genMatching,
     assemble: assemble,

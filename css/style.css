@@ -136,6 +136,20 @@ body.in-practice .topbar { display: none; }
 .today-label { color: var(--muted); margin-bottom: 4px; }
 .today-sub { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
 
+.day-jump { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; }
+.day-jump-label { font-size: 13px; color: var(--muted); }
+.day-jump-select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  padding: 6px 10px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  max-width: 220px;
+}
+.day-jump-select:focus { border-color: var(--accent); }
+
 .stat-row { display: flex; gap: 12px; margin-bottom: 12px; }
 .stat-card { flex: 1; text-align: center; padding: 12px 8px; }
 .stat-num { font-size: 22px; font-weight: 700; }
@@ -333,6 +347,14 @@ body.in-practice .topbar { display: none; }
 .opt.correct { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
 .opt.wrong { background: var(--wrong-bg); border-color: var(--wrong); color: var(--wrong); }
 .opt:disabled { cursor: default; opacity: 1; }
+
+.skip-btn {
+  display: block; margin: 18px auto 0;
+  border: none; background: none; color: var(--muted);
+  font-size: 13px; padding: 10px 16px;
+}
+.skip-btn:hover { color: var(--text); background: #F5F5F5; }
+.skip-btn:disabled { opacity: 0.5; cursor: default; }
 
 .spell-row { display: flex; gap: 10px; margin-top: 16px; }
 .spell-row .input { flex: 1; }

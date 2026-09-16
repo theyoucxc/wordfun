@@ -17,7 +17,6 @@ window.App = (function () {
       answeredScreens: 0,
       byType: {
         choice: { t: 0, c: 0 },
-        listening: { t: 0, c: 0 },
         spelling: { t: 0, c: 0 },
         matching: { t: 0, c: 0 }
       },
@@ -78,25 +77,11 @@ window.App = (function () {
       UI.openSettings();
     });
 
-    // 首次用户手势后预热语音（解锁自动播放限制）
-    document.addEventListener('click', function primeOnce() {
-      TTS.prime();
-      document.removeEventListener('click', primeOnce);
-    });
-
     // 多标签页：数据变化时提示并刷新
     window.addEventListener('storage', function (e) {
       if (e.key === 'wordfun.data') {
         Store.reload();
         UI.renderCurrent();
-      }
-    });
-
-    // 语音异步加载完成后修正仪表盘提示
-    TTS.onReady(function () {
-      if (document.getElementById('view-dashboard') &&
-          !document.getElementById('view-dashboard').hidden) {
-        UI.renderDashboard();
       }
     });
 
@@ -119,7 +104,6 @@ window.App = (function () {
       UI.toast('暂无可练习的题目');
       return;
     }
-    TTS.cancel();
     S = freshSession();
     S.queue = queue;
     S.startedAt = Date.now();
@@ -152,12 +136,20 @@ window.App = (function () {
     var h = {
       onAnswer: handleChoice,
       onSpell: handleSpell,
-      onReplay: function () { TTS.speak(S.current.word); },
+      onSkip: skipCurrent,
       onMatchingDone: handleMatchingDone
     };
     UI.renderQuestion(S.current, h);
-    if (S.current.autoSpeak) TTS.speak(S.current.word);
     persist();
+  }
+
+  // 跳过当前单词：不判定、不落库，直接进入下一题（该词仍保持「新词」，下次会话再出现）
+  function skipCurrent() {
+    if (S.locked) return;
+    S.locked = true;
+    S.answeredScreens++;
+    UI.updateProgress(S.answeredScreens, S.totalScreens);
+    nextQuestion();
   }
 
   // ===== 判定与落库 =====
@@ -183,6 +175,7 @@ window.App = (function () {
       if (c.correct) b.classList.add('correct');
       else if (c.id === choiceId && !res.correct) b.classList.add('wrong');
     });
+    wrap.querySelectorAll('.skip-btn').forEach(function (b) { b.disabled = true; });
   }
 
   function handleSpell(text) {
@@ -256,7 +249,11 @@ window.App = (function () {
       correct += S.byType[k].c;
     });
     Store.recordSession(Store.dateKey(new Date()));
-    TTS.cancel();
+    // 手动跳转到某一天时，当天新词学完后自动顺延到下一天（自动模式由 currentStudyDay 自行推进）
+    var sd = Store.getStudyDay();
+    if (sd > 0 && sd < Store.maxStudyDay() && SRS.freshInDay(sd) === 0) {
+      Store.setStudyDay(sd + 1);
+    }
     UI.renderSummary({
       total: total,
       correct: correct,
@@ -277,7 +274,6 @@ window.App = (function () {
       message: '进度已自动保存，退出后可从首页「继续上次练习」接着学。',
       confirmText: '退出',
       onConfirm: function () {
-        TTS.cancel();
         S = null;
         goHome();
       }
@@ -290,7 +286,6 @@ window.App = (function () {
       UI.toast('没有可继续的练习');
       return;
     }
-    TTS.cancel();
     S = saved;
     UI.showView('practice');
     UI.renderPracticeHeader(S.totalScreens);
@@ -298,17 +293,8 @@ window.App = (function () {
     showCurrent();
   }
 
-  function toggleTTS() {
-    var s = Store.getSettings();
-    Store.setSettings({ ttsEnabled: !s.ttsEnabled });
-    if (!Store.getSettings().ttsEnabled) TTS.cancel();
-    UI.updateSpeakerIcon();
-    UI.toast(Store.getSettings().ttsEnabled ? '已开启发音' : '已关闭发音');
-  }
-
   function goHome() {
     S = null;
-    TTS.cancel();
     UI.showView('dashboard');
   }
 
@@ -318,7 +304,6 @@ window.App = (function () {
     startSession: startSession,
     resumeSession: resumeSession,
     confirmAbandon: confirmAbandon,
-    toggleTTS: toggleTTS,
     goHome: goHome
   };
 })();

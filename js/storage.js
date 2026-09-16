@@ -25,7 +25,7 @@ window.Store = (function () {
         totalCorrect: 0,
         totalSessions: 0
       },
-      meta: { createdAt: Date.now(), lastBackupAt: 0, lastStudyAt: 0, seededKBs: [] }
+      meta: { createdAt: Date.now(), lastBackupAt: 0, lastStudyAt: 0, seededKBs: [], studyDay: 0 }
     };
   }
 
@@ -59,6 +59,7 @@ window.Store = (function () {
     }
     if (raw.meta && typeof raw.meta === 'object') Object.assign(d.meta, raw.meta);
     if (!Array.isArray(d.meta.seededKBs)) d.meta.seededKBs = [];
+    if (!(typeof d.meta.studyDay === 'number' && d.meta.studyDay >= 0)) d.meta.studyDay = 0;
     return d;
   }
 
@@ -344,6 +345,28 @@ window.Store = (function () {
     save();
   }
 
+  // ===== 学习天（0 = 自动跟随进度；N = 手动跳转到第 N 天） =====
+  function getStudyDay() {
+    load();
+    var d = data.meta.studyDay;
+    return (typeof d === 'number' && d >= 0) ? d : 0;
+  }
+
+  function maxStudyDay() {
+    load();
+    var max = 0;
+    for (var k in data.words) {
+      if (data.words[k].day > max) max = data.words[k].day;
+    }
+    return max;
+  }
+
+  function setStudyDay(n) {
+    load();
+    data.meta.studyDay = Math.max(0, Math.min(Math.round(Number(n) || 0), maxStudyDay()));
+    save();
+  }
+
   // ===== 备份 =====
   function exportJSON() {
     load();
@@ -403,6 +426,9 @@ window.Store = (function () {
     clearSession: clearSession,
     getSeededKBs: getSeededKBs,
     setSeededKBs: setSeededKBs,
+    getStudyDay: getStudyDay,
+    maxStudyDay: maxStudyDay,
+    setStudyDay: setStudyDay,
     exportJSON: exportJSON,
     importJSON: importJSON,
     clearAll: clearAll
