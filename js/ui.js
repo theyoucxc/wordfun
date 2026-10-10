@@ -51,7 +51,7 @@ window.UI = (function () {
 
   // ===== 视图切换 =====
   function showView(name) {
-    ['dashboard', 'practice', 'library'].forEach(function (v) {
+    ['dashboard', 'basic', 'practice', 'library'].forEach(function (v) {
       getView(v).hidden = v !== name;
     });
     document.querySelectorAll('.tab').forEach(function (t) {
@@ -59,12 +59,14 @@ window.UI = (function () {
     });
     document.body.classList.toggle('in-practice', name === 'practice');
     window.scrollTo(0, 0);
-    if (name === 'dashboard') renderDashboard();
+    if (name === 'dashboard') renderDashboard('daily');
+    if (name === 'basic') renderDashboard('basic');
     if (name === 'library') renderLibrary();
   }
 
   function renderCurrent() {
-    if (!getView('dashboard').hidden) renderDashboard();
+    if (!getView('dashboard').hidden) renderDashboard('daily');
+    else if (!getView('basic').hidden) renderDashboard('basic');
     else if (!getView('library').hidden) renderLibrary();
   }
 
@@ -170,13 +172,18 @@ window.UI = (function () {
     return i;
   }
 
-  // ===== 首页仪表盘 =====
-  function renderDashboard() {
-    var view = getView('dashboard');
+  // ===== 首页仪表盘（area = 'daily' 日常 / 'basic' 基础） =====
+  function renderDashboard(area) {
+    area = area === 'basic' ? 'basic' : 'daily';
+    var view = getView(area === 'basic' ? 'basic' : 'dashboard');
     view.textContent = '';
 
     var words = Store.getWords();
     var now = Date.now();
+
+    var areaWords = words.filter(function (w) {
+      return area === 'basic' ? w.day === 0 : w.day > 0;
+    });
 
     if (!words.length) {
       var emptyCard = el('div', 'card');
@@ -196,42 +203,52 @@ window.UI = (function () {
       return;
     }
 
-    // 今日卡片（按 CSV 天数规划）
-    var override = Store.getStudyDay();   // 0 = 自动跟随进度；N = 手动跳转到第 N 天
-    var session = SRS.buildSession(now);
+    // 今日卡片
+    var session = SRS.buildSession(now, area);
     var studyDay = SRS.effectiveStudyDay();
     var maxDay = Store.maxStudyDay();
-    var dayLabel = studyDay > 0 ? '第 ' + studyDay + ' 天' : '自由词';
 
     var card = el('div', 'card today-card');
-    card.append(el('div', 'today-label', '今天 · ' + dayLabel));
-    card.append(buildDayJump(override, maxDay));
+    if (area === 'basic') {
+      card.append(el('div', 'today-label', '基础学习 · 自由词'));
+    } else {
+      var override = Store.getStudyDay();   // 0 = 自动跟随进度；N = 手动跳转到第 N 天
+      var dayLabel = studyDay > 0 ? '第 ' + studyDay + ' 天' : '自由词';
+      card.append(el('div', 'today-label', '今天 · ' + dayLabel));
+      card.append(buildDayJump(override, maxDay));
+    }
+
+    var emptyForArea = areaWords.length === 0;
     card.append(el('div', 'today-num', String(session ? session.newTotal : 0)));
     card.append(el('div', 'today-sub',
-      '待学新词 ' + (session ? session.newTotal : 0) +
-      ' · 待复习 ' + (session ? session.dueTotal : 0) +
-      (session ? '' : ' · 今日任务全部完成')));
-    var startBtn = btn(session ? '开始练习' : '今日任务完成', 'btn-primary btn-lg');
+      (emptyForArea
+        ? '该区域暂无单词'
+        : '待学新词 ' + (session ? session.newTotal : 0) +
+          ' · 待复习 ' + (session ? session.dueTotal : 0) +
+          (session ? '' : ' · 今日任务全部完成'))));
+
+    var startBtn = btn(session ? '开始练习' : (emptyForArea ? '暂无单词' : '今日任务完成'), 'btn-primary btn-lg');
     if (!session) startBtn.disabled = true;
-    else startBtn.addEventListener('click', function () { window.App.startSession(); });
+    else startBtn.addEventListener('click', function () { window.App.startSession(area); });
     card.append(startBtn);
     view.append(card);
 
-    // 上次未完成的练习（可继续）
+    // 上次未完成的练习（可继续）——只在会话所属区域显示
     var saved = Store.getSession();
-    if (saved && saved.queue && saved.queue.length) {
+    if (saved && saved.queue && saved.queue.length &&
+        (saved.area === area || (saved.area !== 'basic' && area === 'daily'))) {
       var resumeBtn = btn('继续上次练习', 'resume-btn');
       resumeBtn.addEventListener('click', function () { window.App.resumeSession(); });
       view.append(resumeBtn);
     }
 
-    // 统计行
-    var summary = Store.getSummary();
+    // 统计行（该区域）
+    var areaMastered = areaWords.filter(function (w) { return w.box >= 4; }).length;
     var statRow = el('div', 'stat-row');
     statRow.append(
-      statCard(String(summary.total), '总词数'),
-      statCard(String(summary.mastered), '已掌握'),
-      statCard(summary.accuracy + '%', '正确率')
+      statCard(String(areaWords.length), area === 'basic' ? '基础词数' : '课程词数'),
+      statCard(String(areaMastered), '已掌握'),
+      statCard(areaWords.length ? Math.round(areaMastered / areaWords.length * 100) + '%' : '0%', '掌握率')
     );
     view.append(statRow);
 
@@ -371,6 +388,7 @@ window.UI = (function () {
     var wordline = el('div', 'lib-wordline');
     wordline.append(el('span', 'lib-word', w.word));
     if (w.day > 0) wordline.append(el('span', 'lib-day', '第' + w.day + '天'));
+    else wordline.append(el('span', 'lib-day', '基础'));
     main.append(wordline, el('div', 'lib-meaning', w.meaning));
 
     var meta = el('div', 'lib-meta');
@@ -424,15 +442,48 @@ window.UI = (function () {
       build: function (body) {
         var form = document.createElement('form');
         form.id = FORM_ID;
+
+        var wordInput = mkInput({ placeholder: '如 apple', required: true, maxlength: 40, value: isEdit ? word.word : '' });
+        var meaningInput = mkInput({ placeholder: '如 n. 苹果', required: true, maxlength: 500, value: isEdit ? word.meaning : '' });
+
+        // 区域选择：日常（按天，需天数）/ 基础（自由词 day=0）
+        var areaSel = document.createElement('select');
+        areaSel.className = 'input';
+        var optDaily = document.createElement('option');
+        optDaily.value = 'daily';
+        optDaily.textContent = '日常学习（按天）';
+        var optBasic = document.createElement('option');
+        optBasic.value = 'basic';
+        optBasic.textContent = '基础学习（自由词）';
+        areaSel.append(optDaily, optBasic);
+
+        var dayInput = mkInput({ type: 'number', min: '1', max: '999', placeholder: '如 1（第几天）', value: '' });
+        var dayField = mkField('第几天', dayInput);
+
+        var initArea = (isEdit && word.day > 0) ? 'daily' : 'basic';
+        areaSel.value = initArea;
+        if (isEdit && word.day > 0) dayInput.value = String(word.day);
+        dayField.style.display = areaSel.value === 'daily' ? '' : 'none';
+        areaSel.addEventListener('change', function () {
+          dayField.style.display = areaSel.value === 'daily' ? '' : 'none';
+        });
+
         form.append(
-          mkField('单词', mkInput({ placeholder: '如 apple', required: true, maxlength: 40, value: isEdit ? word.word : '' })),
-          mkField('词义', mkInput({ placeholder: '如 n. 苹果', required: true, maxlength: 500, value: isEdit ? word.meaning : '' }))
+          mkField('单词', wordInput),
+          mkField('词义', meaningInput),
+          mkField('区域', areaSel),
+          dayField
         );
+
         form.addEventListener('submit', function (e) {
           e.preventDefault();
+          var isBasic = areaSel.value !== 'daily';
+          var day = isBasic ? 0 : (parseInt(dayInput.value, 10) || 0);
+          if (!isBasic && day <= 0) { toast('请填写日常学习的第几天'); return; }
           var fields = {
-            word: form.elements[0].value,
-            meaning: form.elements[1].value
+            word: wordInput.value,
+            meaning: meaningInput.value,
+            day: day
           };
           if (isEdit) {
             if (!Store.updateWord(word.id, fields)) { toast('单词格式不合法'); return; }
@@ -467,8 +518,8 @@ window.UI = (function () {
       build: function (body) {
         body.append(el('div', 'import-help',
           '每行一个单词，支持以下格式：\n' +
-          '· 所属天/单元,单词,词义（课程 CSV，如「第1天 Unit 1 Lesson 1,act,v.行动」）\n' +
-          '· 单词,词义（无天数的自由词）\n' +
+          '· 所属天/单元,单词,词义（课程 CSV，如「第1天 Unit 1 Lesson 1,act,v.行动」→ 归入「日常」）\n' +
+          '· 单词,词义（无天数的自由词 → 归入「基础」）\n' +
           '· CSV 文件（Excel 可另存为 CSV 后导入）\n' +
           '带 * 的派生词会自动去掉 *；重复导入的单词会自动合并，不会丢失学习进度。'));
 
@@ -871,7 +922,7 @@ window.UI = (function () {
 
     var btns = el('div', 'sum-btns');
     var again = btn('再来一场', 'btn-primary');
-    again.addEventListener('click', function () { window.App.startSession(); });
+    again.addEventListener('click', function () { window.App.startSession(result.area); });
     var home = btn('返回首页', '');
     home.addEventListener('click', function () { window.App.goHome(); });
     btns.append(again, home);

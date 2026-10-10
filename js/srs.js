@@ -18,19 +18,16 @@ window.SRS = (function () {
     return w.box === 0 && w.correctCount === 0;
   }
 
-  // 当前学习天 = 仍有未学新词的最小 day（学完当天自动进入下一天）；
-  // 全学完则取最大 day；无课程（全是 day=0 自由词）时为 0
+  // 当前学习天（仅「日常」区域的 day>0 课程词）= 仍有未学新词的最小 day；
+  // 学完当天自动进入下一天；全学完则取最大 day；无课程时为 0。
+  // 基础区域的自由词（day=0）不参与天数计算。
   function currentStudyDay() {
     var words = Store.getWords();
-    var minDay = Infinity, maxDay = 0, anyFresh = false;
+    var minDay = Infinity, maxDay = 0;
     words.forEach(function (w) {
-      if (w.day > maxDay) maxDay = w.day;
-      if (isFresh(w)) {
-        anyFresh = true;
-        if (w.day > 0 && w.day < minDay) minDay = w.day;
-      }
+      if (w.day > 0 && w.day > maxDay) maxDay = w.day;
+      if (w.day > 0 && isFresh(w) && w.day < minDay) minDay = w.day;
     });
-    if (!anyFresh) return maxDay;
     return minDay === Infinity ? maxDay : minDay;
   }
 
@@ -73,19 +70,23 @@ window.SRS = (function () {
     return { wordId: id, word: w.word, fromBox: fromBox, toBox: w.box, correct: isCorrect };
   }
 
-  // 会话选词（按天）：新词 = 当前学习天（或 day=0 自由词）尚未学过的词，
-  // 复习 = 到期词优先、最多占一半，剩余名额给新词；无词可练返回 null
-  function buildSession(now) {
+  // 会话选词（分区域）：area = 'daily'（日常课程词，day>0）或 'basic'（基础自由词，day=0）。
+  // 新词 = 该区域尚未学过的词（daily 取当前学习天，basic 取全部 day=0 新词）；
+  // 复习 = 该区域到期词优先、最多占一半，剩余名额给新词；无词可练返回 null
+  function buildSession(now, area) {
+    area = area === 'basic' ? 'basic' : 'daily';
     var settings = Store.getSettings();
     var words = Store.getWords();
     if (!words.length) return null;
 
-    var studyDay = effectiveStudyDay();
+    var studyDay = area === 'basic' ? 0 : effectiveStudyDay();
 
     var due = [], fresh = [];
     words.forEach(function (w) {
+      var inArea = area === 'basic' ? (w.day === 0) : (w.day > 0);
+      if (!inArea) return;
       if (isFresh(w)) {
-        if (w.day === studyDay || w.day === 0) fresh.push(w);
+        if (area === 'basic' || w.day === studyDay) fresh.push(w);
       } else if (isDue(w, now)) {
         due.push(w);
       }
@@ -117,6 +118,7 @@ window.SRS = (function () {
     return {
       words: selected,
       studyDay: studyDay,
+      area: area,
       dueTotal: due.length,
       newTotal: fresh.length
     };

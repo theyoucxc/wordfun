@@ -15,6 +15,7 @@ window.App = (function () {
       startedAt: 0,
       totalScreens: 0,
       answeredScreens: 0,
+      area: 'daily',
       byType: {
         choice: { t: 0, c: 0 },
         spelling: { t: 0, c: 0 },
@@ -93,10 +94,11 @@ window.App = (function () {
   }
 
   // ===== 会话流程 =====
-  function startSession() {
-    var built = SRS.buildSession(Date.now());
+  function startSession(area) {
+    area = area === 'basic' ? 'basic' : 'daily';
+    var built = SRS.buildSession(Date.now(), area);
     if (!built) {
-      UI.toast('今日任务已完成，明天再来吧');
+      UI.toast(area === 'basic' ? '基础词已全部学完' : '今日任务已完成，明天再来吧');
       return;
     }
     var queue = Questions.assemble(built.words, Store.getWords());
@@ -105,6 +107,7 @@ window.App = (function () {
       return;
     }
     S = freshSession();
+    S.area = area;
     S.queue = queue;
     S.startedAt = Date.now();
     S.totalScreens = queue.length;
@@ -271,7 +274,8 @@ window.App = (function () {
       byType: S.byType,
       transitions: S.transitions,
       newLearned: S.newLearned,
-      durationMs: Date.now() - S.startedAt
+      durationMs: Date.now() - S.startedAt,
+      area: S.area
     });
     Store.clearSession();
     S = null;
@@ -297,6 +301,7 @@ window.App = (function () {
       return;
     }
     S = saved;
+    if (S.area !== 'basic') S.area = 'daily'; // 旧会话兜底
     UI.showView('practice');
     UI.renderPracticeHeader(S.totalScreens);
     UI.updateProgress(S.answeredScreens, S.totalScreens);
